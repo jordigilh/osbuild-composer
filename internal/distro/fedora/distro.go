@@ -74,10 +74,20 @@ type imageType struct {
 	enabledServices  []string
 	disabledServices []string
 	kernelOptions    string
-	bootable         bool
-	rpmOstree        bool
 	defaultSize      uint64
-	assembler        func(bootType distro.BootType, options distro.ImageOptions, arch distro.Arch, imageSize uint64) *osbuild.Assembler
+
+	assembler func(bootType distro.BootType, options distro.ImageOptions, arch distro.Arch, imageSize uint64) *osbuild.Assembler
+
+	buildPipelines   []string
+	payloadPipelines []string
+	exports          []string
+
+	// rpmOstree: edge/ostree
+	rpmOstree bool
+	// bootable image
+	bootable bool
+	// If set to a value, it is preferred over the architecture value
+	bootType distro.BootType
 }
 
 func removePackage(packages []string, packageToRemove string) []string {
@@ -296,12 +306,51 @@ func (t *imageType) Exports() []string {
 	return distro.ExportsFallback()
 }
 
-func (t *imageType) Manifest(c *blueprint.Customizations,
+// checkOptions checks the validity and compatibility of options and customizations for the image type.
+func (t *imageType) checkOptions(customizations *blueprint.Customizations, options distro.ImageOptions) error {
+
+	// if options.Size is 0, this will be the default size of the image type
+	imageSize := t.Size(options.Size)
+
+	if kernelOpts := customizations.GetKernel(); kernelOpts.Append != "" && t.rpmOstree && !t.bootable {
+		return fmt.Errorf("kernel boot parameter customizations are not supported for ostree types")
+	}
+
+	mountpoints := customizations.GetFilesystems()
+
+	if mountpoints != nil && t.rpmOstree {
+		return fmt.Errorf("Custom mountpoints are not supported for ostree types")
+	}
+
+	invalidMountpoints := []string{}
+	for _, m := range mountpoints {
+		if m.Mountpoint != "/" {
+			invalidMountpoints = append(invalidMountpoints, m.Mountpoint)
+		} else {
+			if m.MinSize > imageSize {
+				imageSize = m.MinSize
+			}
+		}
+	}
+
+	if len(invalidMountpoints) > 0 {
+		return fmt.Errorf("The following custom mountpoints are not supported %+q", invalidMountpoints)
+	}
+
+	return nil
+}
+
+func (t *imageType) Manifest(customizations *blueprint.Customizations,
 	options distro.ImageOptions,
 	repos []rpmmd.RepoConfig,
 	packageSpecSets map[string][]rpmmd.PackageSpec,
 	seed int64) (distro.Manifest, error) {
-	pipeline, err := t.pipeline(c, options, repos, packageSpecSets[osPkgsKey], packageSpecSets[buildPkgsKey])
+
+	if err := t.checkOptions(customizations, options); err != nil {
+		return distro.Manifest{}, err
+	}
+
+	pipeline, err := t.pipeline(customizations, options, repos, packageSpecSets[osPkgsKey], packageSpecSets[buildPkgsKey])
 	if err != nil {
 		return distro.Manifest{}, err
 	}
@@ -354,31 +403,6 @@ func (t *imageType) pipeline(c *blueprint.Customizations, options distro.ImageOp
 
 	// if options.Size is 0, this will be the default size of the image type
 	imageSize := t.Size(options.Size)
-
-	if kernelOpts := c.GetKernel(); kernelOpts != nil && kernelOpts.Append != "" && t.rpmOstree {
-		return nil, fmt.Errorf("kernel boot parameter customizations are not supported for ostree types")
-	}
-
-	mountpoints := c.GetFilesystems()
-
-	if mountpoints != nil && t.rpmOstree {
-		return nil, fmt.Errorf("Custom mountpoints are not supported for ostree types")
-	}
-
-	invalidMountpoints := []string{}
-	for _, m := range mountpoints {
-		if m.Mountpoint != "/" {
-			invalidMountpoints = append(invalidMountpoints, m.Mountpoint)
-		} else {
-			if m.MinSize > imageSize {
-				imageSize = m.MinSize
-			}
-		}
-	}
-
-	if len(invalidMountpoints) > 0 {
-		return nil, fmt.Errorf("The following custom mountpoints are not supported %+q", invalidMountpoints)
-	}
 
 	p := &osbuild.Pipeline{}
 	p.SetBuild(t.buildPipeline(repos, *t.arch, buildPackageSpecs), "org.osbuild.fedora33")
@@ -782,10 +806,16 @@ func newDistro(name, modulePlatformID, ostreeRef string) distro.Distro {
 			buildPkgsKey: distroBuildPackageSet,
 			osPkgsKey:    ec2CorePackageSet,
 		},
-		enabledServices: ec2EnabledServices,
-		kernelOptions:   "ro no_timer_check console=ttyS0,115200n8 console=tty1 biosdevname=0 net.ifnames=0 console=ttyS0,115200",
-		bootable:        true,
-		defaultSize:     6 * GigaByte,
+		defaultTarget:    "multi-user.target",
+		enabledServices:  ec2EnabledServices,
+		kernelOptions:    "ro no_timer_check console=ttyS0,115200n8 console=tty1 biosdevname=0 net.ifnames=0 console=ttyS0,115200",
+		bootable:         true,
+		bootType:         distro.LegacyBootType,
+		defaultSize:      6 * GigaByte,
+		pipelines:        ec2Pipelines,
+		buildPipelines:   []string{"build"},
+		payloadPipelines: []string{"os", "image"},
+		exports:          []string{"image"},
 		assembler: func(bootType distro.BootType, options distro.ImageOptions, arch distro.Arch, imageSize uint64) *osbuild.Assembler {
 			return qemuAssembler("raw", "image.raw", bootType, imageSize)
 		},
@@ -914,8 +944,8 @@ func newDistro(name, modulePlatformID, ostreeRef string) distro.Distro {
 	}
 
 	x86_64.addImageTypes(
-		iotImgType,
 		amiImgType,
+		iotImgType,
 		qcow2ImageType,
 		openstackImgType,
 		vhdImgType,
