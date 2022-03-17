@@ -3,6 +3,8 @@
         "x86_64": [
             "ami",
             "fedora-iot-commit",
+            "fedora-iot-container",
+            "fedora-iot-installer",
             "openstack",
             "qcow2",
             "vhd",
@@ -13,13 +15,18 @@
             "ami",
             "openstack",
             "qcow2",
-            "oci"
+            "oci",
+            "fedora-iot-commit",
+            "fedora-iot-container",
+            "fedora-iot-installer"
         ]
     },
     "fedora-35": {
         "x86_64": [
             "ami",
             "fedora-iot-commit",
+            "fedora-iot-container",
+            "fedora-iot-installer",
             "openstack",
             "qcow2",
             "vhd",
@@ -30,7 +37,10 @@
             "ami",
             "openstack",
             "qcow2",
-            "oci"
+            "oci",
+            "fedora-iot-commit",
+            "fedora-iot-container",
+            "fedora-iot-installer"
         ]
     },
     "centos-8": {
