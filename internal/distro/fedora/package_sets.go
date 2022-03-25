@@ -29,7 +29,7 @@ func distroBuildPackageSet(t *imageType) rpmmd.PackageSet {
 		},
 	}
 
-	switch t.arch.Name() {
+	switch t.Arch().Name() {
 
 	case distro.X86_64ArchName:
 		ps = ps.Append(x8664BuildPackageSet(t))
@@ -55,6 +55,7 @@ func ec2BuildPackageSet(t *imageType) rpmmd.PackageSet {
 func ec2CommonPackageSet(t *imageType) rpmmd.PackageSet {
 	return rpmmd.PackageSet{
 		Include: []string{
+			"@core",
 			"chrony",
 			"selinux-policy-targeted",
 			"langpacks-en",
@@ -70,7 +71,7 @@ func ec2CommonPackageSet(t *imageType) rpmmd.PackageSet {
 			"geolite2-country",
 			"zram-generator-defaults",
 		},
-	}.Append(bootPackageSet(t)).Append(coreOsCommonPackageSet(t))
+	}.Append(bootPackageSet(t))
 }
 
 // common edge image build package set
@@ -103,7 +104,7 @@ func anacondaBootPackageSet(t *imageType) rpmmd.PackageSet {
 		},
 	}
 
-	switch t.arch.Name() {
+	switch t.Arch().Name() {
 	case distro.X86_64ArchName:
 		ps = ps.Append(grubCommon)
 		ps = ps.Append(efiCommon)
@@ -130,7 +131,7 @@ func anacondaBootPackageSet(t *imageType) rpmmd.PackageSet {
 		})
 
 	default:
-		panic(fmt.Sprintf("unsupported arch: %s", t.arch.Name()))
+		panic(fmt.Sprintf("unsupported arch: %s", t.Arch().Name()))
 	}
 
 	return ps
@@ -189,7 +190,7 @@ func bootPackageSet(t *imageType) rpmmd.PackageSet {
 
 	ps := rpmmd.PackageSet{}
 
-	switch t.arch.Name() {
+	switch t.Arch().Name() {
 	case distro.X86_64ArchName:
 		if addLegacyBootPkg {
 			ps = ps.Append(x8664LegacyBootPackageSet(t))
@@ -202,7 +203,7 @@ func bootPackageSet(t *imageType) rpmmd.PackageSet {
 		ps = ps.Append(aarch64UEFIBootPackageSet(t))
 
 	default:
-		panic(fmt.Sprintf("unsupported boot arch: %s", t.arch.Name()))
+		panic(fmt.Sprintf("unsupported boot arch: %s", t.Arch().Name()))
 	}
 
 	return ps
@@ -243,18 +244,6 @@ func aarch64UEFIBootPackageSet(t *imageType) rpmmd.PackageSet {
 	}
 }
 
-// OS package sets
-
-func coreOsCommonPackageSet(t *imageType) rpmmd.PackageSet {
-	ps := rpmmd.PackageSet{
-		Include: []string{
-			"@core",
-		},
-	}
-
-	return ps
-}
-
 // We need to unpack the 'fedora cloud server' group because of the dependency collision with fedora-release-identity
 // and the packages coming from the blueprint
 func fedoraCloudServerPackageSet(t *imageType) rpmmd.PackageSet {
@@ -262,12 +251,12 @@ func fedoraCloudServerPackageSet(t *imageType) rpmmd.PackageSet {
 	ps := rpmmd.PackageSet{
 		Include: []string{
 			// Mandatory packages
+			"@core",
 			"cloud-init",
 			"cloud-utils-growpart",
 			"dracut-config-generic",
 			"grubby",
 			"rsync",
-			"syslinux-extlinux",
 			"tar",
 
 			// Default packages
@@ -275,28 +264,59 @@ func fedoraCloudServerPackageSet(t *imageType) rpmmd.PackageSet {
 			"console-login-helper-messages-motdgen",
 			"console-login-helper-messages-profile",
 		},
-	}.Append(coreOsCommonPackageSet(t))
-
-	if t.arch.Name() == distro.X86_64ArchName {
-		ps.Append(rpmmd.PackageSet{
-			Include: []string{
-				"syslinux-extlinux",
-			},
-		})
-
+		Exclude: []string{
+			"grubby-deprecated",
+			"extlinux-bootloader",
+		},
 	}
 
-	r, err := strconv.Atoi(t.arch.distro.releaseVersion)
+	r, err := strconv.Atoi(t.Arch().Distro().Releasever())
 	if err != nil {
-		log.Errorf("failed to convert fedora release %s to string: %s", t.arch.distro.releaseVersion, err)
+		log.Errorf("failed to convert fedora release %s to string: %s", t.Arch().Distro().Releasever(), err)
+	}
+
+	switch t.Arch().Name() {
+	case distro.X86_64ArchName:
+		ps = ps.Append(rpmmd.PackageSet{
+			Include: []string{
+				"syslinux",
+				"syslinux-extlinux",
+				"syslinux-extlinux-nonlinux",
+				"syslinux-nonlinux",
+				"mtools",
+			},
+		})
 	}
 	if r > 34 {
-		ps.Append(rpmmd.PackageSet{
+		ps = ps.Append(rpmmd.PackageSet{
 			Include: []string{
 				"@Bootloader tools for Cloud images",
+				"libpng",
+				"graphite2",
+				"harfbuzz",
+				"freetype",
+				"grub2-tools-extra",
 			},
 		})
+		switch t.Arch().Name() {
+		case distro.X86_64ArchName:
+			ps = ps.Append(rpmmd.PackageSet{
+				Include: []string{
+					"efi-filesystem",
+					"efibootmgr",
+					"shim-ia32",
+					"shim-x64",
+					"grub2-efi-ia32",
+					"grub2-efi-x64",
+					"grub2-tools-efi",
+					"mokutil",
+					"efivar-libs",
+					"mtools",
+				},
+			})
+		}
 	}
+
 	return ps
 }
 
@@ -326,6 +346,7 @@ func qcow2CommonPackageSet(t *imageType) rpmmd.PackageSet {
 func vhdCommonPackageSet(t *imageType) rpmmd.PackageSet {
 	ps := rpmmd.PackageSet{
 		Include: []string{
+			"@core",
 			"chrony",
 			"selinux-policy-targeted",
 			"langpacks-en",
@@ -342,7 +363,7 @@ func vhdCommonPackageSet(t *imageType) rpmmd.PackageSet {
 			"geolite2-country",
 			"zram-generator-defaults",
 		},
-	}.Append(bootPackageSet(t)).Append(coreOsCommonPackageSet(t))
+	}.Append(bootPackageSet(t))
 
 	return ps
 }
@@ -373,6 +394,7 @@ func vmdkCommonPackageSet(t *imageType) rpmmd.PackageSet {
 func openstackCommonPackageSet(t *imageType) rpmmd.PackageSet {
 	ps := rpmmd.PackageSet{
 		Include: []string{
+			"@core",
 			"chrony",
 			"selinux-policy-targeted",
 			"spice-vdagent",
@@ -388,7 +410,7 @@ func openstackCommonPackageSet(t *imageType) rpmmd.PackageSet {
 			"geolite2-country",
 			"zram-generator-defaults",
 		},
-	}.Append(bootPackageSet(t)).Append(coreOsCommonPackageSet(t))
+	}.Append(bootPackageSet(t))
 
 	return ps
 }
@@ -493,7 +515,7 @@ func iotCommitPackageSet(t *imageType) rpmmd.PackageSet {
 			"iwlax2xx-firmware",
 		},
 	}
-	switch t.arch.Name() {
+	switch t.Arch().Name() {
 	case distro.X86_64ArchName:
 		ps = ps.Append(x8664IOTCommitPackageSet())
 
@@ -578,7 +600,7 @@ func installerPackageSet(t *imageType) rpmmd.PackageSet {
 		},
 	}
 
-	switch t.arch.Name() {
+	switch t.Arch().Name() {
 	case distro.X86_64ArchName:
 		ps = ps.Append(rpmmd.PackageSet{
 			Include: []string{
@@ -728,7 +750,7 @@ func anacondaPackageSet(t *imageType) rpmmd.PackageSet {
 
 	ps = ps.Append(anacondaBootPackageSet(t))
 
-	switch t.arch.Name() {
+	switch t.Arch().Name() {
 	case distro.X86_64ArchName:
 		ps = ps.Append(rpmmd.PackageSet{
 			Include: []string{
@@ -747,7 +769,7 @@ func anacondaPackageSet(t *imageType) rpmmd.PackageSet {
 		})
 
 	default:
-		panic(fmt.Sprintf("unsupported arch: %s", t.arch.Name()))
+		panic(fmt.Sprintf("unsupported arch: %s", t.Arch().Name()))
 	}
 
 	return ps

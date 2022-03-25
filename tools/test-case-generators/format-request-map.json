@@ -525,11 +525,7 @@
           }
         ],
         "modules": [],
-        "groups": [
-          {
-            "name": "core"
-          }
-        ],
+        "groups": [],
         "customizations": {
           "hostname": "my-host",
           "kernel": {

@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/osbuild/osbuild-composer/internal/blueprint"
-	"github.com/osbuild/osbuild-composer/internal/common"
 	"github.com/osbuild/osbuild-composer/internal/disk"
 	"github.com/osbuild/osbuild-composer/internal/distro"
 	osbuild "github.com/osbuild/osbuild-composer/internal/osbuild2"
@@ -18,6 +17,7 @@ import (
 )
 
 const (
+	GigaByte = 1024 * 1024 * 1024
 	// package set names
 
 	// build package set name
@@ -41,9 +41,235 @@ const (
 	fedora36Distribution = "fedora-36"
 )
 
-var mountpointAllowList = []string{
-	"/", "/var", "/opt", "/srv", "/usr", "/app", "/data", "/home", "/tmp",
-}
+var (
+	mountpointAllowList = []string{
+		"/", "/var", "/opt", "/srv", "/usr", "/app", "/data", "/home", "/tmp",
+	}
+
+	// Services
+	iotServices = []string{
+		"NetworkManager.service",
+		"firewalld.service",
+		"rngd.service",
+		"sshd.service",
+		"zezere_ignition.timer",
+		"zezere_ignition_banner.service",
+		"greenboot-grub2-set-counter",
+		"greenboot-grub2-set-success",
+		"greenboot-healthcheck",
+		"greenboot-rpm-ostree-grub2-check-fallback",
+		"greenboot-status",
+		"greenboot-task-runner",
+		"redboot-auto-reboot",
+		"redboot-task-runner",
+		"parsec",
+		"dbus-parsec",
+	}
+
+	// Image Definitions
+	iotCommitImgType = imageType{
+		name:        "fedora-iot-commit",
+		nameAliases: []string{"iot-commit"},
+		filename:    "commit.tar",
+		mimeType:    "application/x-tar",
+		packageSets: map[string]packageSetFunc{
+			buildPkgsKey: iotBuildPackageSet,
+			osPkgsKey:    iotCommitPackageSet,
+		},
+		defaultImageConfig: &distro.ImageConfig{
+			EnabledServices: iotServices,
+		},
+		rpmOstree:        true,
+		pipelines:        edgeCommitPipelines,
+		buildPipelines:   []string{"build"},
+		payloadPipelines: []string{"ostree-tree", "ostree-commit", "commit-archive"},
+		exports:          []string{"commit-archive"},
+	}
+
+	iotOCIImgType = imageType{
+		name:        "fedora-iot-container",
+		nameAliases: []string{"iot-container"},
+		filename:    "container.tar",
+		mimeType:    "application/x-tar",
+		packageSets: map[string]packageSetFunc{
+			buildPkgsKey: iotBuildPackageSet,
+			osPkgsKey:    iotCommitPackageSet,
+			containerPkgsKey: func(t *imageType) rpmmd.PackageSet {
+				return rpmmd.PackageSet{
+					Include: []string{"nginx"},
+				}
+			},
+		},
+		defaultImageConfig: &distro.ImageConfig{
+			EnabledServices: iotServices,
+		},
+		rpmOstree:        true,
+		bootISO:          false,
+		pipelines:        iotContainerPipelines,
+		buildPipelines:   []string{"build"},
+		payloadPipelines: []string{"ostree-tree", "ostree-commit", "container-tree", "container"},
+		exports:          []string{"container"},
+	}
+
+	iotInstallerImgType = imageType{
+		name:        "fedora-iot-installer",
+		nameAliases: []string{"iot-installer"},
+		filename:    "installer.iso",
+		mimeType:    "application/x-iso9660-image",
+		packageSets: map[string]packageSetFunc{
+			buildPkgsKey:     iotInstallerBuildPackageSet,
+			osPkgsKey:        iotCommitPackageSet,
+			installerPkgsKey: iotInstallerPackageSet,
+		},
+		defaultImageConfig: &distro.ImageConfig{
+			Locale:          "en_US.UTF-8",
+			EnabledServices: iotServices,
+		},
+		rpmOstree:        true,
+		bootISO:          true,
+		pipelines:        iotInstallerPipelines,
+		buildPipelines:   []string{"build"},
+		payloadPipelines: []string{"anaconda-tree", "bootiso-tree", "bootiso"},
+		exports:          []string{"bootiso"},
+	}
+
+	qcow2ImgType = imageType{
+		name:     "qcow2",
+		filename: "disk.qcow2",
+		mimeType: "application/x-qemu-disk",
+		packageSets: map[string]packageSetFunc{
+			buildPkgsKey: distroBuildPackageSet,
+			osPkgsKey:    qcow2CommonPackageSet,
+		},
+		defaultImageConfig: &distro.ImageConfig{
+			DefaultTarget: "graphical.target",
+			EnabledServices: []string{
+				"cloud-init.service",
+				"cloud-config.service",
+				"cloud-final.service",
+				"cloud-init-local.service",
+			},
+		},
+		bootable:            true,
+		defaultSize:         2 * GigaByte,
+		pipelines:           qcow2Pipelines,
+		buildPipelines:      []string{"build"},
+		payloadPipelines:    []string{"os", "image", "qcow2"},
+		exports:             []string{"qcow2"},
+		basePartitionTables: defaultBasePartitionTables,
+	}
+
+	vhdImgType = imageType{
+		name:     "vhd",
+		filename: "disk.vhd",
+		mimeType: "application/x-vhd",
+		packageSets: map[string]packageSetFunc{
+			buildPkgsKey: distroBuildPackageSet,
+			osPkgsKey:    vhdCommonPackageSet,
+		},
+		defaultImageConfig: &distro.ImageConfig{
+			Locale: "en_US.UTF-8",
+			EnabledServices: []string{
+				"sshd",
+				"waagent",
+			},
+			DefaultTarget: "graphical.target",
+			DisabledServices: []string{
+				"proc-sys-fs-binfmt_misc.mount",
+				"loadmodules.service",
+			},
+		},
+		kernelOptions:       "ro biosdevname=0 rootdelay=300 console=ttyS0 earlyprintk=ttyS0 net.ifnames=0",
+		bootable:            true,
+		defaultSize:         2 * GigaByte,
+		pipelines:           vhdPipelines,
+		buildPipelines:      []string{"build"},
+		payloadPipelines:    []string{"os", "image", "vpc"},
+		exports:             []string{"vpc"},
+		basePartitionTables: defaultBasePartitionTables,
+	}
+
+	vmdkImgType = imageType{
+		name:     "vmdk",
+		filename: "disk.vmdk",
+		mimeType: "application/x-vmdk",
+		packageSets: map[string]packageSetFunc{
+			buildPkgsKey: distroBuildPackageSet,
+			osPkgsKey:    vmdkCommonPackageSet,
+		},
+		defaultImageConfig: &distro.ImageConfig{
+			Locale: "en_US.UTF-8",
+			EnabledServices: []string{
+				"cloud-init.service",
+				"cloud-config.service",
+				"cloud-final.service",
+				"cloud-init-local.service",
+			},
+		},
+		bootable:            true,
+		defaultSize:         2 * GigaByte,
+		pipelines:           vmdkPipelines,
+		buildPipelines:      []string{"build"},
+		payloadPipelines:    []string{"os", "image", "vmdk"},
+		exports:             []string{"vmdk"},
+		basePartitionTables: defaultBasePartitionTables,
+	}
+
+	openstackImgType = imageType{
+		name:     "openstack",
+		filename: "disk.qcow2",
+		mimeType: "application/x-qemu-disk",
+		packageSets: map[string]packageSetFunc{
+			buildPkgsKey: distroBuildPackageSet,
+			osPkgsKey:    openstackCommonPackageSet,
+		},
+		defaultImageConfig: &distro.ImageConfig{
+			Locale: "en_US.UTF-8",
+			EnabledServices: []string{
+				"cloud-init.service",
+				"cloud-config.service",
+				"cloud-final.service",
+				"cloud-init-local.service",
+			},
+		},
+		bootable:            true,
+		defaultSize:         2 * GigaByte,
+		pipelines:           openstackPipelines,
+		buildPipelines:      []string{"build"},
+		payloadPipelines:    []string{"os", "image", "qcow2"},
+		exports:             []string{"qcow2"},
+		basePartitionTables: defaultBasePartitionTables,
+	}
+
+	// default EC2 images config (common for all architectures)
+	defaultEc2ImageConfig = &distro.ImageConfig{
+		Locale:   "en_US",
+		Timezone: "UTC",
+		EnabledServices: []string{
+			"cloud-init.service",
+		},
+	}
+
+	amiImgType = imageType{
+		name:     "ami",
+		filename: "image.raw",
+		mimeType: "application/octet-stream",
+		packageSets: map[string]packageSetFunc{
+			buildPkgsKey: ec2BuildPackageSet,
+			osPkgsKey:    ec2CommonPackageSet,
+		},
+		defaultImageConfig:  defaultEc2ImageConfig,
+		kernelOptions:       "ro no_timer_check net.ifnames=0 console=tty1 console=ttyS0,115200n8",
+		bootable:            true,
+		bootType:            distro.LegacyBootType,
+		defaultSize:         6 * GigaByte,
+		pipelines:           ec2Pipelines,
+		buildPipelines:      []string{"build"},
+		payloadPipelines:    []string{"os", "image"},
+		exports:             []string{"image"},
+		basePartitionTables: defaultBasePartitionTables,
+	}
+)
 
 type distribution struct {
 	name               string
@@ -61,20 +287,8 @@ type distribution struct {
 
 // RHEL-based OS image configuration defaults
 var defaultDistroImageConfig = &distro.ImageConfig{
-	Timezone: "America/New_York",
-	Locale:   "C.UTF-8",
-	Sysconfig: []*osbuild.SysconfigStageOptions{
-		{
-			Kernel: &osbuild.SysconfigKernelOptions{
-				UpdateDefault: true,
-				DefaultKernel: "kernel",
-			},
-			Network: &osbuild.SysconfigNetworkOptions{
-				Networking: true,
-				NoZeroConf: true,
-			},
-		},
-	},
+	Timezone: "UTC",
+	Locale:   "en_US",
 }
 
 // distribution objects without the arches > image types
@@ -86,7 +300,7 @@ var distroMap = map[string]distribution{
 		releaseVersion:     "34",
 		modulePlatformID:   "platform:f34",
 		vendor:             "fedora",
-		ostreeRefTmpl:      "fedora/34/%s/edge",
+		ostreeRefTmpl:      "fedora/34/%s/iot",
 		isolabelTmpl:       "Fedora-34-BaseOS-%s",
 		runner:             "org.osbuild.fedora34",
 		defaultImageConfig: defaultDistroImageConfig,
@@ -98,7 +312,7 @@ var distroMap = map[string]distribution{
 		releaseVersion:     "35",
 		modulePlatformID:   "platform:f35",
 		vendor:             "fedora",
-		ostreeRefTmpl:      "fedora/35/%s/edge",
+		ostreeRefTmpl:      "fedora/35/%s/iot",
 		isolabelTmpl:       "Fedora-35-BaseOS-%s",
 		runner:             "org.osbuild.fedora35",
 		defaultImageConfig: defaultDistroImageConfig,
@@ -110,7 +324,7 @@ var distroMap = map[string]distribution{
 		releaseVersion:     "36",
 		modulePlatformID:   "platform:f36",
 		vendor:             "fedora",
-		ostreeRefTmpl:      "fedora/36/%s/edge",
+		ostreeRefTmpl:      "fedora/36/%s/iot",
 		isolabelTmpl:       "Fedora-36-BaseOS-%s",
 		runner:             "org.osbuild.fedora36",
 		defaultImageConfig: defaultDistroImageConfig,
@@ -278,7 +492,7 @@ func (t *imageType) MIMEType() string {
 func (t *imageType) OSTreeRef() string {
 	d := t.arch.distro
 	if t.rpmOstree {
-		return fmt.Sprintf(d.ostreeRefTmpl, t.arch.name)
+		return fmt.Sprintf(d.ostreeRefTmpl, t.arch.Name())
 	}
 	return ""
 }
@@ -336,7 +550,7 @@ func (t *imageType) PackageSets(bp blueprint.Blueprint) map[string]rpmmd.Package
 	// the layout is converted to LVM so we need to corresponding packages
 	if !t.rpmOstree {
 
-		pt, exists := t.basePartitionTables[t.arch.name]
+		pt, exists := t.basePartitionTables[t.arch.Name()]
 		if !exists {
 			panic(fmt.Sprintf("unknown architecture with boot type: %s %s", t.arch.Name(), t.bootType))
 		}
@@ -403,9 +617,9 @@ func (t *imageType) getPartitionTable(
 	options distro.ImageOptions,
 	rng *rand.Rand,
 ) (*disk.PartitionTable, error) {
-	basePartitionTable, exists := t.basePartitionTables[t.arch.name]
+	basePartitionTable, exists := t.basePartitionTables[t.arch.Name()]
 	if !exists {
-		panic(fmt.Sprintf("unknown architecture with boot type: %s %s", t.arch.Name(), t.bootType))
+		return nil, fmt.Errorf("unknown arch: " + t.arch.Name())
 	}
 
 	imageSize := t.Size(options.Size)
@@ -426,7 +640,7 @@ func (t *imageType) getDefaultImageConfig() *distro.ImageConfig {
 }
 
 func (t *imageType) PartitionType() string {
-	basePartitionTable, exists := t.basePartitionTables[t.arch.name]
+	basePartitionTable, exists := t.basePartitionTables[t.arch.Name()]
 	if !exists {
 		return ""
 	}
@@ -603,7 +817,6 @@ func NewF36() distro.Distro {
 }
 
 func newDistro(distroName string) distro.Distro {
-	const GigaByte = 1024 * 1024 * 1024
 
 	rd := distroMap[distroName]
 
@@ -621,260 +834,10 @@ func newDistro(distroName string) distro.Distro {
 		bootType: distro.UEFIBootType,
 	}
 
-	// Shared Services
-	iotServices := []string{
-		"NetworkManager.service",
-		"firewalld.service",
-		"rngd.service",
-		"sshd.service",
-		"zezere_ignition.timer",
-		"zezere_ignition_banner.service",
-		"greenboot-grub2-set-counter",
-		"greenboot-grub2-set-success",
-		"greenboot-healthcheck",
-		"greenboot-rpm-ostree-grub2-check-fallback",
-		"greenboot-status",
-		"greenboot-task-runner",
-		"redboot-auto-reboot",
-		"redboot-task-runner",
-		"parsec",
-		"dbus-parsec",
-	}
-
-	// Image Definitions
-	iotCommitImgType := imageType{
-		name:        "fedora-iot-commit",
-		nameAliases: []string{"iot-commit"},
-		filename:    "commit.tar",
-		mimeType:    "application/x-tar",
-		packageSets: map[string]packageSetFunc{
-			buildPkgsKey: iotBuildPackageSet,
-			osPkgsKey:    iotCommitPackageSet,
-		},
-		defaultImageConfig: &distro.ImageConfig{
-			EnabledServices: iotServices,
-		},
-		rpmOstree:        true,
-		pipelines:        edgeCommitPipelines,
-		buildPipelines:   []string{"build"},
-		payloadPipelines: []string{"ostree-tree", "ostree-commit", "commit-archive"},
-		exports:          []string{"commit-archive"},
-	}
-
-	iotOCIImgType := imageType{
-		name:        "fedora-iot-container",
-		nameAliases: []string{"iot-container"},
-		filename:    "container.tar",
-		mimeType:    "application/x-tar",
-		packageSets: map[string]packageSetFunc{
-			buildPkgsKey: iotBuildPackageSet,
-			osPkgsKey:    iotCommitPackageSet,
-			containerPkgsKey: func(t *imageType) rpmmd.PackageSet {
-				return rpmmd.PackageSet{
-					Include: []string{"nginx"},
-				}
-			},
-		},
-		defaultImageConfig: &distro.ImageConfig{
-			EnabledServices: iotServices,
-		},
-		rpmOstree:        true,
-		bootISO:          false,
-		pipelines:        iotContainerPipelines,
-		buildPipelines:   []string{"build"},
-		payloadPipelines: []string{"ostree-tree", "ostree-commit", "container-tree", "container"},
-		exports:          []string{"container"},
-	}
-
-	iotInstallerImgType := imageType{
-		name:        "fedora-iot-installer",
-		nameAliases: []string{"iot-installer"},
-		filename:    "installer.iso",
-		mimeType:    "application/x-iso9660-image",
-		packageSets: map[string]packageSetFunc{
-			buildPkgsKey:     iotInstallerBuildPackageSet,
-			osPkgsKey:        iotCommitPackageSet,
-			installerPkgsKey: iotInstallerPackageSet,
-		},
-		defaultImageConfig: &distro.ImageConfig{
-			Locale:          "en_US.UTF-8",
-			EnabledServices: iotServices,
-		},
-		rpmOstree:        true,
-		bootISO:          true,
-		pipelines:        iotInstallerPipelines,
-		buildPipelines:   []string{"build"},
-		payloadPipelines: []string{"anaconda-tree", "bootiso-tree", "bootiso"},
-		exports:          []string{"bootiso"},
-	}
-
-	qcow2ImgType := imageType{
-		name:     "qcow2",
-		filename: "disk.qcow2",
-		mimeType: "application/x-qemu-disk",
-		packageSets: map[string]packageSetFunc{
-			buildPkgsKey: distroBuildPackageSet,
-			osPkgsKey:    qcow2CommonPackageSet,
-		},
-		defaultImageConfig: &distro.ImageConfig{
-			DefaultTarget: "multi-user.target",
-			EnabledServices: []string{
-				"cloud-init.service",
-				"cloud-config.service",
-				"cloud-final.service",
-				"cloud-init-local.service",
-			},
-		},
-		bootable:            true,
-		defaultSize:         3 * GigaByte,
-		pipelines:           qcow2Pipelines,
-		buildPipelines:      []string{"build"},
-		payloadPipelines:    []string{"os", "image", "qcow2"},
-		exports:             []string{"qcow2"},
-		basePartitionTables: defaultBasePartitionTables,
-	}
-
-	vhdImgType := imageType{
-		name:     "vhd",
-		filename: "disk.vhd",
-		mimeType: "application/x-vhd",
-		packageSets: map[string]packageSetFunc{
-			buildPkgsKey: distroBuildPackageSet,
-			osPkgsKey:    vhdCommonPackageSet,
-		},
-		defaultImageConfig: &distro.ImageConfig{
-			Locale: "en_US.UTF-8",
-			EnabledServices: []string{
-				"sshd",
-				"waagent",
-			},
-			DefaultTarget: "multi-user.target",
-			DisabledServices: []string{
-				"proc-sys-fs-binfmt_misc.mount",
-				"loadmodules.service",
-			},
-		},
-		kernelOptions:       "ro biosdevname=0 rootdelay=300 console=ttyS0 earlyprintk=ttyS0 net.ifnames=0",
-		bootable:            true,
-		defaultSize:         2 * GigaByte,
-		pipelines:           vhdPipelines,
-		buildPipelines:      []string{"build"},
-		payloadPipelines:    []string{"os", "image", "vpc"},
-		exports:             []string{"vpc"},
-		basePartitionTables: defaultBasePartitionTables,
-	}
-
-	vmdkImgType := imageType{
-		name:     "vmdk",
-		filename: "disk.vmdk",
-		mimeType: "application/x-vmdk",
-		packageSets: map[string]packageSetFunc{
-			buildPkgsKey: distroBuildPackageSet,
-			osPkgsKey:    vmdkCommonPackageSet,
-		},
-		defaultImageConfig: &distro.ImageConfig{
-			Locale: "en_US.UTF-8",
-			EnabledServices: []string{
-				"cloud-init.service",
-				"cloud-config.service",
-				"cloud-final.service",
-				"cloud-init-local.service",
-			},
-		},
-		bootable:            true,
-		defaultSize:         2 * GigaByte,
-		pipelines:           vmdkPipelines,
-		buildPipelines:      []string{"build"},
-		payloadPipelines:    []string{"os", "image", "vmdk"},
-		exports:             []string{"vmdk"},
-		basePartitionTables: defaultBasePartitionTables,
-	}
-
-	openstackImgType := imageType{
-		name:     "openstack",
-		filename: "disk.qcow2",
-		mimeType: "application/x-qemu-disk",
-		packageSets: map[string]packageSetFunc{
-			buildPkgsKey: distroBuildPackageSet,
-			osPkgsKey:    openstackCommonPackageSet,
-		},
-		defaultImageConfig: &distro.ImageConfig{
-			Locale: "en_US.UTF-8",
-			EnabledServices: []string{
-				"cloud-init.service",
-				"cloud-config.service",
-				"cloud-final.service",
-				"cloud-init-local.service",
-			},
-		},
-		bootable:            true,
-		defaultSize:         2 * GigaByte,
-		pipelines:           openstackPipelines,
-		buildPipelines:      []string{"build"},
-		payloadPipelines:    []string{"os", "image", "qcow2"},
-		exports:             []string{"qcow2"},
-		basePartitionTables: defaultBasePartitionTables,
-	}
-
-	// default EC2 images config (common for all architectures)
-	defaultEc2ImageConfig := &distro.ImageConfig{
-		Locale:   "en_US.UTF-8",
-		Timezone: "UTC",
-		Keyboard: &osbuild.KeymapStageOptions{
-			Keymap: "us",
-			X11Keymap: &osbuild.X11KeymapOptions{
-				Layouts: []string{"us"},
-			},
-		},
-		EnabledServices: []string{
-			"cloud-init.service",
-		},
-		DefaultTarget: "graphical.target",
-		Sysconfig: []*osbuild.SysconfigStageOptions{
-			{
-				Kernel: &osbuild.SysconfigKernelOptions{
-					UpdateDefault: true,
-					DefaultKernel: "kernel",
-				},
-				Network: &osbuild.SysconfigNetworkOptions{
-					Networking: true,
-					NoZeroConf: true,
-				},
-				NetworkScripts: &osbuild.NetworkScriptsOptions{
-					IfcfgFiles: map[string]osbuild.IfcfgFile{
-						"eth0": {
-							Device:    "eth0",
-							Bootproto: osbuild.IfcfgBootprotoDHCP,
-							OnBoot:    common.BoolToPtr(true),
-							Type:      osbuild.IfcfgTypeEthernet,
-							UserCtl:   common.BoolToPtr(true),
-							PeerDNS:   common.BoolToPtr(true),
-							IPv6Init:  common.BoolToPtr(false),
-						},
-					},
-				},
-			},
-		},
-	}
-
-	amiImgType := imageType{
-		name:     "ami",
-		filename: "image.raw",
-		mimeType: "application/octet-stream",
-		packageSets: map[string]packageSetFunc{
-			buildPkgsKey: ec2BuildPackageSet,
-			osPkgsKey:    ec2CommonPackageSet,
-		},
-		defaultImageConfig:  defaultEc2ImageConfig,
-		kernelOptions:       "ro no_timer_check console=ttyS0,115200n8 console=tty1 biosdevname=0 net.ifnames=0 console=ttyS0,115200",
-		bootable:            true,
-		bootType:            distro.LegacyBootType,
-		defaultSize:         6 * GigaByte,
-		pipelines:           ec2Pipelines,
-		buildPipelines:      []string{"build"},
-		payloadPipelines:    []string{"os", "image"},
-		exports:             []string{"image"},
-		basePartitionTables: defaultBasePartitionTables,
+	s390x := architecture{
+		distro:   &rd,
+		name:     distro.S390xArchName,
+		bootType: distro.LegacyBootType,
 	}
 
 	ociImgType := qcow2ImgType
@@ -901,6 +864,10 @@ func newDistro(distroName string) distro.Distro {
 		iotInstallerImgType,
 	)
 
-	rd.addArches(x86_64, aarch64)
+	s390x.addImageTypes()
+
+	rd.addArches(x86_64, aarch64, s390x)
 	return &rd
 }
+
+// Shared Services

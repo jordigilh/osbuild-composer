@@ -167,7 +167,7 @@ func iotInstallerPipelines(t *imageType, customizations *blueprint.Customization
 	pipelines = append(pipelines, *buildPipeline(repos, packageSetSpecs[buildPkgsKey], t.arch.distro.runner))
 	installerPackages := packageSetSpecs[installerPkgsKey]
 	d := t.arch.distro
-	archName := t.arch.name
+	archName := t.Arch().Name()
 	kernelVer := rpmmd.GetVerStrFromPackageSpecListPanic(installerPackages, "kernel")
 	ostreeRepoPath := "/ostree/repo"
 	payloadStages := ostreePayloadStages(options, ostreeRepoPath)
@@ -275,6 +275,8 @@ func osPipeline(t *imageType,
 
 	if hostname := c.GetHostname(); hostname != nil {
 		p.AddStage(osbuild.NewHostnameStage(&osbuild.HostnameStageOptions{Hostname: *hostname}))
+	} else {
+		p.AddStage(osbuild.NewHostnameStage(&osbuild.HostnameStageOptions{Hostname: "localhost.localdomain"}))
 	}
 
 	timezone, ntpServers := c.GetTimezoneSettings()
@@ -507,7 +509,7 @@ func containerPipeline(t *imageType, nginxConfigPath, listenPort string) *osbuil
 	p.Name = "container"
 	p.Build = "name:build"
 	options := &osbuild.OCIArchiveStageOptions{
-		Architecture: t.arch.Name(),
+		Architecture: t.Arch().Name(),
 		Filename:     t.Filename(),
 		Config: &osbuild.OCIArchiveConfig{
 			Cmd:          []string{"nginx", "-c", nginxConfigPath},
@@ -647,7 +649,7 @@ func qemuPipeline(inputPipelineName, inputFilename, outputFilename, format, qcow
 }
 
 func bootloaderConfigStage(t *imageType, partitionTable disk.PartitionTable, kernelVer string, install, greenboot bool) *osbuild.Stage {
-	if t.arch.name == distro.S390xArchName {
+	if t.Arch().Name() == distro.S390xArchName {
 		return osbuild.NewZiplStage(new(osbuild.ZiplStageOptions))
 	}
 
@@ -664,6 +666,10 @@ func bootloaderInstStage(filename string, pt *disk.PartitionTable, arch *archite
 	platform := arch.legacy
 	if platform != "" {
 		return osbuild.NewGrub2InstStage(osbuild.NewGrub2InstStageOption(filename, pt, platform))
+	}
+
+	if arch.name == distro.S390xArchName {
+		return osbuild.NewZiplInstStage(osbuild.NewZiplInstStageOptions(kernelVer, pt), disk, devices, mounts)
 	}
 
 	return nil

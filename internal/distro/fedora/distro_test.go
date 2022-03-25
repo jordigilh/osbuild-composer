@@ -14,12 +14,12 @@ import (
 	"github.com/osbuild/osbuild-composer/internal/distro/fedora"
 )
 
-type rhelFamilyDistro struct {
+type fedoraFamilyDistro struct {
 	name   string
 	distro distro.Distro
 }
 
-var rhelFamilyDistros = []rhelFamilyDistro{
+var fedoraFamilyDistros = []fedoraFamilyDistro{
 	{
 		name:   "fedora",
 		distro: fedora.NewF35(),
@@ -163,7 +163,7 @@ func TestFilenameFromType(t *testing.T) {
 			want: wantResult{wantErr: true},
 		},
 	}
-	for _, dist := range rhelFamilyDistros {
+	for _, dist := range fedoraFamilyDistros {
 		t.Run(dist.name, func(t *testing.T) {
 			for _, tt := range tests {
 				t.Run(tt.name, func(t *testing.T) {
@@ -218,7 +218,7 @@ func TestImageType_BuildPackages(t *testing.T) {
 		"x86_64":  x8664BuildPackages,
 		"aarch64": aarch64BuildPackages,
 	}
-	for _, dist := range rhelFamilyDistros {
+	for _, dist := range fedoraFamilyDistros {
 		t.Run(dist.name, func(t *testing.T) {
 			d := dist.distro
 			for _, archLabel := range d.ListArches() {
@@ -273,7 +273,7 @@ func TestImageType_Name(t *testing.T) {
 		},
 	}
 
-	for _, dist := range rhelFamilyDistros {
+	for _, dist := range fedoraFamilyDistros {
 		t.Run(dist.name, func(t *testing.T) {
 			for _, mapping := range imgMap {
 				if mapping.arch == "s390x" && dist.name == "centos" {
@@ -338,7 +338,7 @@ func TestImageTypeAliases(t *testing.T) {
 			},
 		},
 	}
-	for _, dist := range rhelFamilyDistros {
+	for _, dist := range fedoraFamilyDistros {
 		t.Run(dist.name, func(t *testing.T) {
 			for _, tt := range tests {
 				t.Run(tt.name, func(t *testing.T) {
@@ -409,9 +409,9 @@ func TestDistro_ManifestError(t *testing.T) {
 
 func TestArchitecture_ListImageTypes(t *testing.T) {
 	imgMap := []struct {
-		arch                     string
-		imgNames                 []string
-		rhelAdditionalImageTypes []string
+		arch                       string
+		imgNames                   []string
+		fedoraAdditionalImageTypes []string
 	}{
 		{
 			arch: "x86_64",
@@ -441,7 +441,7 @@ func TestArchitecture_ListImageTypes(t *testing.T) {
 		},
 	}
 
-	for _, dist := range rhelFamilyDistros {
+	for _, dist := range fedoraFamilyDistros {
 		t.Run(dist.name, func(t *testing.T) {
 			for _, mapping := range imgMap {
 				arch, err := dist.distro.GetArch(mapping.arch)
@@ -450,8 +450,8 @@ func TestArchitecture_ListImageTypes(t *testing.T) {
 
 				var expectedImageTypes []string
 				expectedImageTypes = append(expectedImageTypes, mapping.imgNames...)
-				if dist.name == "rhel" {
-					expectedImageTypes = append(expectedImageTypes, mapping.rhelAdditionalImageTypes...)
+				if dist.name == "fedora" {
+					expectedImageTypes = append(expectedImageTypes, mapping.fedoraAdditionalImageTypes...)
 				}
 
 				require.ElementsMatch(t, expectedImageTypes, imageTypes)
@@ -462,7 +462,7 @@ func TestArchitecture_ListImageTypes(t *testing.T) {
 
 func TestFedora_ListArches(t *testing.T) {
 	arches := fedora.NewF35().ListArches()
-	assert.Equal(t, []string{"aarch64", "x86_64"}, arches)
+	assert.Equal(t, []string{"aarch64", "s390x", "x86_64"}, arches)
 }
 
 func TestFedora35_GetArch(t *testing.T) {
@@ -478,12 +478,15 @@ func TestFedora35_GetArch(t *testing.T) {
 			name: "aarch64",
 		},
 		{
+			name: "s390x",
+		},
+		{
 			name:          "foo-arch",
 			errorExpected: true,
 		},
 	}
 
-	for _, dist := range rhelFamilyDistros {
+	for _, dist := range fedoraFamilyDistros {
 		t.Run(dist.name, func(t *testing.T) {
 			for _, a := range arches {
 				actualArch, err := dist.distro.GetArch(a.name)
