@@ -35,7 +35,7 @@ func qcow2Pipelines(t *imageType, customizations *blueprint.Customizations, opti
 	imagePipeline := liveImagePipeline(treePipeline.Name, diskfile, partitionTable, t.arch, kernelVer)
 	pipelines = append(pipelines, *imagePipeline)
 
-	qemuPipeline := qemuPipeline(imagePipeline.Name, diskfile, t.filename, "qcow2", "1.1")
+	qemuPipeline := qemuPipeline(imagePipeline.Name, diskfile, t.filename, osbuild.QEMUFormatQCOW2, osbuild.QCOW2Options{Compat: "1.1"})
 	pipelines = append(pipelines, *qemuPipeline)
 
 	return pipelines, nil
@@ -72,7 +72,7 @@ func vhdPipelines(t *imageType, customizations *blueprint.Customizations, option
 	imagePipeline := liveImagePipeline(treePipeline.Name, diskfile, partitionTable, t.arch, kernelVer)
 	pipelines = append(pipelines, *imagePipeline)
 
-	qemuPipeline := qemuPipeline(imagePipeline.Name, diskfile, t.filename, "vpc", "")
+	qemuPipeline := qemuPipeline(imagePipeline.Name, diskfile, t.filename, osbuild.QEMUFormatVPC, nil)
 	pipelines = append(pipelines, *qemuPipeline)
 	return pipelines, nil
 }
@@ -97,7 +97,7 @@ func vmdkPipelines(t *imageType, customizations *blueprint.Customizations, optio
 	imagePipeline := liveImagePipeline(treePipeline.Name, diskfile, partitionTable, t.arch, kernelVer)
 	pipelines = append(pipelines, *imagePipeline)
 
-	qemuPipeline := qemuPipeline(imagePipeline.Name, diskfile, t.filename, "vmdk", "")
+	qemuPipeline := qemuPipeline(imagePipeline.Name, diskfile, t.filename, osbuild.QEMUFormatVMDK, nil)
 	pipelines = append(pipelines, *qemuPipeline)
 	return pipelines, nil
 }
@@ -122,7 +122,7 @@ func openstackPipelines(t *imageType, customizations *blueprint.Customizations, 
 	imagePipeline := liveImagePipeline(treePipeline.Name, diskfile, partitionTable, t.arch, kernelVer)
 	pipelines = append(pipelines, *imagePipeline)
 
-	qemuPipeline := qemuPipeline(imagePipeline.Name, diskfile, t.filename, "qcow2", "")
+	qemuPipeline := qemuPipeline(imagePipeline.Name, diskfile, t.filename, osbuild.QEMUFormatQCOW2, nil)
 	pipelines = append(pipelines, *qemuPipeline)
 	return pipelines, nil
 }
@@ -172,7 +172,7 @@ func iotInstallerPipelines(t *imageType, customizations *blueprint.Customization
 	ostreeRepoPath := "/ostree/repo"
 	payloadStages := ostreePayloadStages(options, ostreeRepoPath)
 	kickstartOptions := ostreeKickstartStageOptions(makeISORootPath(ostreeRepoPath), options.OSTree.Ref)
-	pipelines = append(pipelines, *anacondaTreePipeline(repos, installerPackages, kernelVer, archName, d.product, d.osVersion, "edge"))
+	pipelines = append(pipelines, *anacondaTreePipeline(repos, installerPackages, kernelVer, archName, d.product, d.osVersion, "iot"))
 	isolabel := fmt.Sprintf(d.isolabelTmpl, archName)
 	pipelines = append(pipelines, *bootISOTreePipeline(kernelVer, archName, d.vendor, d.product, d.osVersion, isolabel, kickstartOptions, payloadStages))
 	pipelines = append(pipelines, *bootISOPipeline(t.Filename(), d.isolabelTmpl, archName, false))
@@ -638,12 +638,15 @@ func liveImagePipeline(inputPipelineName string, outputFilename string, pt *disk
 	return p
 }
 
-func qemuPipeline(inputPipelineName, inputFilename, outputFilename, format, qcow2Compat string) *osbuild.Pipeline {
+func qemuPipeline(inputPipelineName, inputFilename, outputFilename string, format osbuild.QEMUFormat, formatOptions osbuild.QEMUFormatOptions) *osbuild.Pipeline {
 	p := new(osbuild.Pipeline)
-	p.Name = format
+	p.Name = string(format)
 	p.Build = "name:build"
 
-	qemuStage := osbuild.NewQEMUStage(qemuStageOptions(outputFilename, format, qcow2Compat), osbuild.NewQemuStagePipelineFilesInputs(inputPipelineName, inputFilename))
+	qemuStage := osbuild.NewQEMUStage(
+		osbuild.NewQEMUStageOptions(outputFilename, format, formatOptions),
+		osbuild.NewQemuStagePipelineFilesInputs(inputPipelineName, inputFilename),
+	)
 	p.AddStage(qemuStage)
 	return p
 }

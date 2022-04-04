@@ -182,8 +182,6 @@ func dracutStageOptions(kernelVer, arch string, additionalModules []string) *osb
 		"url-lib",
 		"drm",
 		"plymouth",
-		"prefixdevname",
-		"prefixdevname-tools",
 		"crypt",
 		"dm",
 		"dmsquash-live",
@@ -264,7 +262,7 @@ func bootISOMonoStageOptions(kernelVer, arch, vendor, product, osVersion, isolab
 			Enabled: arch == distro.X86_64ArchName,
 			Debug:   false,
 		},
-		Templates: "80-rhel",
+		Templates: "99-generic",
 		RootFS: osbuild.RootFS{
 			Size: 9216,
 			Compression: osbuild.FSCompression{
@@ -301,36 +299,6 @@ func xorrisofsStageOptions(filename, isolabel, arch string, isolinux bool) *osbu
 	}
 
 	return options
-}
-
-func qemuStageOptions(filename, format, compat string) *osbuild.QEMUStageOptions {
-	var options osbuild.QEMUFormatOptions
-	switch format {
-	case "raw":
-		options = osbuild.Qcow2Options{
-			Type: "raw",
-		}
-	case "qcow2":
-		options = osbuild.Qcow2Options{
-			Type:   "qcow2",
-			Compat: compat,
-		}
-	case "vpc":
-		options = osbuild.VPCOptions{
-			Type: "vpc",
-		}
-	case "vmdk":
-		options = osbuild.VMDKOptions{
-			Type: "vmdk",
-		}
-	default:
-		panic("unknown format in qemu stage: " + format)
-	}
-
-	return &osbuild.QEMUStageOptions{
-		Filename: filename,
-		Format:   options,
-	}
 }
 
 func nginxConfigStageOptions(path, htmlRoot, listen string) *osbuild.NginxConfigStageOptions {

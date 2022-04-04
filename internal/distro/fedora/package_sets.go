@@ -151,6 +151,7 @@ func anacondaBuildPackageSet(t *imageType) rpmmd.PackageSet {
 	ps := rpmmd.PackageSet{
 		Include: []string{
 			"squashfs-tools",
+			"lorax-templates-generic",
 		},
 	}
 
@@ -720,6 +721,7 @@ func anacondaPackageSet(t *imageType) rpmmd.PackageSet {
 			"rdma-core",
 			"rng-tools",
 			"rpcbind",
+			"rpm-ostree",
 			"rsync",
 			"rsyslog",
 			"selinux-policy-targeted",
@@ -744,12 +746,30 @@ func anacondaPackageSet(t *imageType) rpmmd.PackageSet {
 			"wget",
 			"xfsdump",
 			"xfsprogs",
+			"xorg-x11-drivers",
+			"xorg-x11-fonts-misc",
+			"xorg-x11-server-Xorg",
+			"xorg-x11-xauth",
+			"metacity",
+			"xrdb",
 			"xz",
 		},
 	})
 
 	ps = ps.Append(anacondaBootPackageSet(t))
 
+	r, err := strconv.Atoi(t.Arch().Distro().Releasever())
+	if err != nil {
+		log.Errorf("failed to convert fedora release %s to string: %s", t.Arch().Distro().Releasever(), err)
+	}
+
+	if r <= 34 {
+		ps = ps.Append(rpmmd.PackageSet{
+			Include: []string{
+				"xorg-x11-server-utils",
+			},
+		})
+	}
 	switch t.Arch().Name() {
 	case distro.X86_64ArchName:
 		ps = ps.Append(rpmmd.PackageSet{
