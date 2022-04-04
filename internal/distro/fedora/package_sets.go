@@ -151,6 +151,7 @@ func anacondaBuildPackageSet(t *imageType) rpmmd.PackageSet {
 	ps := rpmmd.PackageSet{
 		Include: []string{
 			"squashfs-tools",
+			"lorax-templates-generic",
 		},
 	}
 
