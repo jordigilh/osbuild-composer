@@ -745,6 +745,7 @@ func anacondaPackageSet(t *imageType) rpmmd.PackageSet {
 			"wget",
 			"xfsdump",
 			"xfsprogs",
+			"xorg-x11-fonts-misc",
 			"xz",
 		},
 	})
