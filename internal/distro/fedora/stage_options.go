@@ -199,8 +199,6 @@ func dracutStageOptions(kernelVer, arch string, additionalModules []string) *osb
 		"url-lib",
 		"drm",
 		"plymouth",
-		"prefixdevname",
-		"prefixdevname-tools",
 		"crypt",
 		"dm",
 		"dmsquash-live",
