@@ -717,6 +717,7 @@ func anacondaPackageSet(t *imageType) rpmmd.PackageSet {
 			"perl-interpreter",
 			"pigz",
 			"plymouth",
+			"prefixdevname",
 			"python3-pyatspi",
 			"rdma-core",
 			"rng-tools",
