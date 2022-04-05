@@ -279,7 +279,7 @@ func bootISOMonoStageOptions(kernelVer, arch, vendor, product, osVersion, isolab
 			Enabled: arch == distro.X86_64ArchName,
 			Debug:   false,
 		},
-		Templates: "80-fedora",
+		Templates: "99-generic",
 		RootFS: osbuild.RootFS{
 			Size: 9216,
 			Compression: osbuild.FSCompression{

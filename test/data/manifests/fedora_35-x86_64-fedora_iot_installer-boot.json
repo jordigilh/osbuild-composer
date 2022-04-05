@@ -6380,7 +6380,7 @@
                 "enabled": true
               },
               "kernel_opts": "inst.ks=hd:LABEL=Fedora-35-BaseOS-x86_64:/osbuild.ks",
-              "templates": "80-rhel",
+              "templates": "99-generic",
               "rootfs": {
                 "compression": {
                   "method": "xz",
