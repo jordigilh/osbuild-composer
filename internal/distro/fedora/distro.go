@@ -80,7 +80,7 @@ var (
 			EnabledServices: iotServices,
 		},
 		rpmOstree:        true,
-		pipelines:        edgeCommitPipelines,
+		pipelines:        iotCommitPipelines,
 		buildPipelines:   []string{"build"},
 		payloadPipelines: []string{"ostree-tree", "ostree-commit", "commit-archive"},
 		exports:          []string{"commit-archive"},
@@ -131,6 +131,29 @@ var (
 		buildPipelines:   []string{"build"},
 		payloadPipelines: []string{"anaconda-tree", "bootiso-tree", "bootiso"},
 		exports:          []string{"bootiso"},
+	}
+
+	iotSimplifiedInstallerImgType = imageType{
+		name:        "iot-simplified-installer",
+		nameAliases: []string{},
+		filename:    "simplified-installer.iso",
+		mimeType:    "application/x-iso9660-image",
+		packageSets: map[string]packageSetFunc{
+			buildPkgsKey:     iotSimplifiedInstallerBuildPackageSet,
+			installerPkgsKey: iotSimplifiedInstallerPackageSet,
+		},
+		defaultImageConfig: &distro.ImageConfig{
+			EnabledServices: iotServices,
+		},
+		defaultSize:         10 * GigaByte,
+		rpmOstree:           true,
+		bootable:            true,
+		bootISO:             true,
+		pipelines:           iotSimplifiedInstallerPipelines,
+		buildPipelines:      []string{"build"},
+		payloadPipelines:    []string{"image-tree", "image", "archive", "coi-tree", "efiboot-tree", "bootiso-tree", "bootiso"},
+		exports:             []string{"bootiso"},
+		basePartitionTables: iotBasePartitionTables,
 	}
 
 	qcow2ImgType = imageType{
@@ -853,6 +876,7 @@ func newDistro(distroName string) distro.Distro {
 		iotOCIImgType,
 		iotCommitImgType,
 		iotInstallerImgType,
+		iotSimplifiedInstallerImgType,
 	)
 	aarch64.addImageTypes(
 		amiImgType,
@@ -862,6 +886,7 @@ func newDistro(distroName string) distro.Distro {
 		iotCommitImgType,
 		iotOCIImgType,
 		iotInstallerImgType,
+		iotSimplifiedInstallerImgType,
 	)
 
 	s390x.addImageTypes()

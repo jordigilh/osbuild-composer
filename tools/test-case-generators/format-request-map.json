@@ -270,6 +270,33 @@
     "no-image-info": true,
     "overrides": {}
   },
+
+  "iot-simplified-installer": {
+    "compose-request": {
+      "distro": "",
+      "arch": "",
+      "image-type": "iot-simplified-installer",
+      "repositories": [],
+      "filename": "installer.iso",
+      "ostree": {
+        "ref": "test/iot",
+        "url": "http://iot.fedora.org/repo",
+        "parent": "test/iot"
+      },
+      "blueprint": {
+        "customizations": {
+          "installation_device": "/dev/vda",
+          "fdo": {
+            "manufacturing_server_url": "https://fdo.example.com",
+            "diun_pub_key_insecure": "true"
+          }
+        }
+      }
+    },
+    "no-image-info": true,
+    "overrides": {}
+  },
+
   "openstack": {
     "boot": {
       "type": "openstack"

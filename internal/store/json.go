@@ -355,6 +355,7 @@ var imageTypeCompatMapping = map[string]string{
 	"iot-commit":                     "iot-commit",
 	"iot-container":                  "iot-container",
 	"iot-installer":                  "iot-installer",
+	"iot-simplified-installer":       "iot-simplified-installer",
 	"rhel-edge-commit":               "rhel-edge-commit",
 	"rhel-edge-container":            "rhel-edge-container",
 	"rhel-edge-installer":            "rhel-edge-installer",

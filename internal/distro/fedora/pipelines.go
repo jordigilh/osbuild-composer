@@ -194,7 +194,7 @@ func iotCorePipelines(t *imageType, customizations *blueprint.Customizations, op
 	return pipelines, nil
 }
 
-func edgeCommitPipelines(t *imageType, customizations *blueprint.Customizations, options distro.ImageOptions, repos []rpmmd.RepoConfig, packageSetSpecs map[string][]rpmmd.PackageSpec, rng *rand.Rand) ([]osbuild.Pipeline, error) {
+func iotCommitPipelines(t *imageType, customizations *blueprint.Customizations, options distro.ImageOptions, repos []rpmmd.RepoConfig, packageSetSpecs map[string][]rpmmd.PackageSpec, rng *rand.Rand) ([]osbuild.Pipeline, error) {
 	pipelines, err := iotCorePipelines(t, customizations, options, repos, packageSetSpecs)
 	if err != nil {
 		return nil, err
@@ -219,6 +219,31 @@ func iotContainerPipelines(t *imageType, customizations *blueprint.Customization
 	pipelines = append(pipelines, *containerTreePipeline(repos, packageSetSpecs[containerPkgsKey], options, customizations, nginxConfigPath, httpPort))
 	pipelines = append(pipelines, *containerPipeline(t, nginxConfigPath, httpPort))
 	return pipelines, nil
+}
+
+func iotImagePipelines(t *imageType, filename string, options distro.ImageOptions, rng *rand.Rand) ([]osbuild.Pipeline, string, error) {
+	pipelines := make([]osbuild.Pipeline, 0)
+	ostreeRepoPath := "/ostree/repo"
+	imgName := "image.raw"
+
+	partitionTable, err := t.getPartitionTable(nil, options, rng)
+	if err != nil {
+		return nil, "", err
+	}
+
+	// prepare ostree deployment tree
+	treePipeline := ostreeDeployPipeline(t, partitionTable, ostreeRepoPath, rng, options)
+	pipelines = append(pipelines, *treePipeline)
+
+	// make raw image from tree
+	imagePipeline := liveImagePipeline(treePipeline.Name, imgName, partitionTable, t.arch, "")
+	pipelines = append(pipelines, *imagePipeline)
+
+	// compress image
+	xzPipeline := xzArchivePipeline(imagePipeline.Name, imgName, filename)
+	pipelines = append(pipelines, *xzPipeline)
+
+	return pipelines, xzPipeline.Name, nil
 }
 
 func buildPipeline(repos []rpmmd.RepoConfig, buildPackageSpecs []rpmmd.PackageSpec, runner string) *osbuild.Pipeline {
@@ -538,6 +563,243 @@ func ostreePayloadStages(options distro.ImageOptions, ostreeRepoPath string) []*
 	return stages
 }
 
+func iotSimplifiedInstallerPipelines(t *imageType, customizations *blueprint.Customizations, options distro.ImageOptions, repos []rpmmd.RepoConfig, packageSetSpecs map[string][]rpmmd.PackageSpec, rng *rand.Rand) ([]osbuild.Pipeline, error) {
+	pipelines := make([]osbuild.Pipeline, 0)
+	pipelines = append(pipelines, *buildPipeline(repos, packageSetSpecs[buildPkgsKey], t.arch.distro.runner))
+	installerPackages := packageSetSpecs[installerPkgsKey]
+	kernelVer := rpmmd.GetVerStrFromPackageSpecListPanic(installerPackages, "kernel")
+	imgName := "disk.img.xz"
+	installDevice := customizations.GetInstallationDevice()
+
+	// create the raw image
+	imagePipelines, imgPipelineName, err := iotImagePipelines(t, imgName, options, rng)
+	if err != nil {
+		return nil, err
+	}
+
+	pipelines = append(pipelines, imagePipelines...)
+
+	// create boot ISO with raw image
+	d := t.arch.distro
+	archName := t.arch.name
+	installerTreePipeline := simplifiedInstallerTreePipeline(repos, installerPackages, kernelVer, archName, d.product, d.osVersion, "iot", customizations.GetFDO())
+	isolabel := fmt.Sprintf(d.isolabelTmpl, archName)
+	efibootTreePipeline := simplifiedInstallerEFIBootTreePipeline(installDevice, kernelVer, archName, d.vendor, d.product, d.osVersion, isolabel, customizations.GetFDO())
+	bootISOTreePipeline := simplifiedInstallerBootISOTreePipeline(imgPipelineName, kernelVer, rng)
+
+	pipelines = append(pipelines, *installerTreePipeline, *efibootTreePipeline, *bootISOTreePipeline)
+	pipelines = append(pipelines, *bootISOPipeline(t.Filename(), d.isolabelTmpl, t.Arch().Name(), false))
+
+	return pipelines, nil
+}
+
+func simplifiedInstallerBootISOTreePipeline(archivePipelineName, kver string, rng *rand.Rand) *osbuild.Pipeline {
+	p := new(osbuild.Pipeline)
+	p.Name = "bootiso-tree"
+	p.Build = "name:build"
+
+	p.AddStage(osbuild.NewCopyStageSimple(
+		&osbuild.CopyStageOptions{
+			Paths: []osbuild.CopyStagePath{
+				{
+					From: "input://file/disk.img.xz",
+					To:   "tree:///disk.img.xz",
+				},
+			},
+		},
+		osbuild.NewFilesInputs(osbuild.NewFilesInputReferencesPipeline(archivePipelineName, "disk.img.xz")),
+	))
+
+	p.AddStage(osbuild.NewMkdirStage(
+		&osbuild.MkdirStageOptions{
+			Paths: []osbuild.Path{
+				{
+					Path: "images",
+				},
+				{
+					Path: "images/pxeboot",
+				},
+			},
+		},
+	))
+
+	pt := disk.PartitionTable{
+		Size: 20971520,
+		Partitions: []disk.Partition{
+			{
+				Start: 0,
+				Size:  20971520,
+				Payload: &disk.Filesystem{
+					Type:       "vfat",
+					Mountpoint: "/",
+					UUID:       disk.NewVolIDFromRand(rng),
+				},
+			},
+		},
+	}
+
+	filename := "images/efiboot.img"
+	loopback := osbuild.NewLoopbackDevice(&osbuild.LoopbackDeviceOptions{Filename: filename})
+	p.AddStage(osbuild.NewTruncateStage(&osbuild.TruncateStageOptions{Filename: filename, Size: fmt.Sprintf("%d", pt.Size)}))
+
+	for _, stage := range osbuild.GenMkfsStages(&pt, loopback) {
+		p.AddStage(stage)
+	}
+
+	inputName := "root-tree"
+	copyInputs := osbuild.NewCopyStagePipelineTreeInputs(inputName, "efiboot-tree")
+	copyOptions, copyDevices, copyMounts := osbuild.GenCopyFSTreeOptions(inputName, "efiboot-tree", filename, &pt)
+	p.AddStage(osbuild.NewCopyStage(copyOptions, copyInputs, copyDevices, copyMounts))
+
+	inputName = "coi"
+	copyInputs = osbuild.NewCopyStagePipelineTreeInputs(inputName, "coi-tree")
+	p.AddStage(osbuild.NewCopyStageSimple(
+		&osbuild.CopyStageOptions{
+			Paths: []osbuild.CopyStagePath{
+				{
+					From: fmt.Sprintf("input://%s/boot/vmlinuz-%s", inputName, kver),
+					To:   "tree:///images/pxeboot/vmlinuz",
+				},
+				{
+					From: fmt.Sprintf("input://%s/boot/initramfs-%s.img", inputName, kver),
+					To:   "tree:///images/pxeboot/initrd.img",
+				},
+			},
+		},
+		copyInputs,
+	))
+
+	inputName = "efi-tree"
+	copyInputs = osbuild.NewCopyStagePipelineTreeInputs(inputName, "efiboot-tree")
+	p.AddStage(osbuild.NewCopyStageSimple(
+		&osbuild.CopyStageOptions{
+			Paths: []osbuild.CopyStagePath{
+				{
+					From: fmt.Sprintf("input://%s/EFI", inputName),
+					To:   "tree:///",
+				},
+			},
+		},
+		copyInputs,
+	))
+
+	return p
+}
+
+func simplifiedInstallerEFIBootTreePipeline(installDevice, kernelVer, arch, vendor, product, osVersion, isolabel string, fdo *blueprint.FDOCustomization) *osbuild.Pipeline {
+	p := new(osbuild.Pipeline)
+	p.Name = "efiboot-tree"
+	p.Build = "name:build"
+	p.AddStage(osbuild.NewGrubISOStage(grubISOStageOptions(installDevice, kernelVer, arch, vendor, product, osVersion, isolabel, fdo)))
+	return p
+}
+
+func simplifiedInstallerTreePipeline(repos []rpmmd.RepoConfig, packages []rpmmd.PackageSpec, kernelVer, arch, product, osVersion, variant string, fdo *blueprint.FDOCustomization) *osbuild.Pipeline {
+	p := new(osbuild.Pipeline)
+	p.Name = "coi-tree"
+	p.Build = "name:build"
+	p.AddStage(osbuild.NewRPMStage(osbuild.NewRPMStageOptions(repos), osbuild.NewRpmStageSourceFilesInputs(packages)))
+	p.AddStage(osbuild.NewBuildstampStage(buildStampStageOptions(arch, product, osVersion, variant)))
+	p.AddStage(osbuild.NewLocaleStage(&osbuild.LocaleStageOptions{Language: "C.UTF-8"}))
+	dracutStageOptions := dracutStageOptions(kernelVer, arch, []string{
+		"coreos-installer",
+		"fdo",
+	})
+	if fdo.DiunPubKeyRootCerts != "" {
+		p.AddStage(osbuild.NewFDOStageForRootCerts(fdo.DiunPubKeyRootCerts))
+		dracutStageOptions.Install = []string{"/fdo_diun_pub_key_root_certs.pem"}
+	}
+	p.AddStage(osbuild.NewDracutStage(dracutStageOptions))
+	return p
+}
+
+func ostreeDeployPipeline(
+	t *imageType,
+	pt *disk.PartitionTable,
+	repoPath string,
+	rng *rand.Rand,
+	options distro.ImageOptions,
+) *osbuild.Pipeline {
+
+	p := new(osbuild.Pipeline)
+	p.Name = "image-tree"
+	p.Build = "name:build"
+	osname := "redhat"
+	remote := "fedora-iot"
+
+	p.AddStage(osbuild.OSTreeInitFsStage())
+	p.AddStage(osbuild.NewOSTreePullStage(
+		&osbuild.OSTreePullStageOptions{Repo: repoPath, Remote: remote},
+		osbuild.NewOstreePullStageInputs("org.osbuild.source", options.OSTree.Parent, options.OSTree.Ref),
+	))
+	p.AddStage(osbuild.NewOSTreeOsInitStage(
+		&osbuild.OSTreeOsInitStageOptions{
+			OSName: osname,
+		},
+	))
+	p.AddStage(osbuild.NewOSTreeConfigStage(ostreeConfigStageOptions(repoPath, true)))
+	p.AddStage(osbuild.NewMkdirStage(efiMkdirStageOptions()))
+	kernelOpts := osbuild.GenImageKernelOptions(pt)
+	p.AddStage(osbuild.NewOSTreeDeployStage(
+		&osbuild.OSTreeDeployStageOptions{
+			OsName: osname,
+			Ref:    options.OSTree.Ref,
+			Remote: remote,
+			Mounts: []string{"/boot", "/boot/efi"},
+			Rootfs: osbuild.Rootfs{
+				Label: "root",
+			},
+			KernelOpts: kernelOpts,
+		},
+	))
+
+	if options.OSTree.URL != "" {
+		p.AddStage(osbuild.NewOSTreeRemotesStage(
+			&osbuild.OSTreeRemotesStageOptions{
+				Repo: "/ostree/repo",
+				Remotes: []osbuild.OSTreeRemote{
+					{
+						Name: remote,
+						URL:  options.OSTree.URL,
+					},
+				},
+			},
+		))
+	}
+
+	p.AddStage(osbuild.NewOSTreeFillvarStage(
+		&osbuild.OSTreeFillvarStageOptions{
+			Deployment: osbuild.OSTreeDeployment{
+				OSName: osname,
+				Ref:    options.OSTree.Ref,
+			},
+		},
+	))
+
+	fstabOptions := osbuild.NewFSTabStageOptions(pt)
+	fstabOptions.OSTree = &osbuild.OSTreeFstab{
+		Deployment: osbuild.OSTreeDeployment{
+			OSName: osname,
+			Ref:    options.OSTree.Ref,
+		},
+	}
+	p.AddStage(osbuild.NewFSTabStage(fstabOptions))
+
+	// TODO: Add users?
+
+	p.AddStage(bootloaderConfigStage(t, *pt, "", true, true))
+
+	p.AddStage(osbuild.NewOSTreeSelinuxStage(
+		&osbuild.OSTreeSelinuxStageOptions{
+			Deployment: osbuild.OSTreeDeployment{
+				OSName: osname,
+				Ref:    options.OSTree.Ref,
+			},
+		},
+	))
+	return p
+}
+
 func anacondaTreePipeline(repos []rpmmd.RepoConfig, packages []rpmmd.PackageSpec, kernelVer, arch, product, osVersion, variant string) *osbuild.Pipeline {
 	p := new(osbuild.Pipeline)
 	p.Name = "anaconda-tree"
@@ -635,6 +897,19 @@ func liveImagePipeline(inputPipelineName string, outputFilename string, pt *disk
 
 	loopback := osbuild.NewLoopbackDevice(&osbuild.LoopbackDeviceOptions{Filename: outputFilename})
 	p.AddStage(bootloaderInstStage(outputFilename, pt, arch, kernelVer, copyDevices, copyMounts, loopback))
+	return p
+}
+
+func xzArchivePipeline(inputPipelineName, inputFilename, outputFilename string) *osbuild.Pipeline {
+	p := new(osbuild.Pipeline)
+	p.Name = "archive"
+	p.Build = "name:build"
+
+	p.AddStage(osbuild.NewXzStage(
+		osbuild.NewXzStageOptions(outputFilename),
+		osbuild.NewFilesInputs(osbuild.NewFilesInputReferencesPipeline(inputPipelineName, inputFilename)),
+	))
+
 	return p
 }
 

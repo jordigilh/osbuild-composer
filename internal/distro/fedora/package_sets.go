@@ -84,6 +84,28 @@ func iotBuildPackageSet(t *imageType) rpmmd.PackageSet {
 		})
 }
 
+func iotEncryptionBuildPackageSet(t *imageType) rpmmd.PackageSet {
+	return rpmmd.PackageSet{
+		Include: []string{
+			"clevis",
+			"clevis-luks",
+			"cryptsetup",
+		},
+	}
+}
+
+func iotSimplifiedInstallerBuildPackageSet(t *imageType) rpmmd.PackageSet {
+	return iotInstallerBuildPackageSet(t).Append(
+		iotEncryptionBuildPackageSet(t),
+	)
+}
+
+func iotRawImageBuildPackageSet(t *imageType) rpmmd.PackageSet {
+	return iotBuildPackageSet(t).Append(iotEncryptionBuildPackageSet(t)).Append(
+		bootPackageSet(t),
+	)
+}
+
 // installer boot package sets, needed for booting and
 // also in the build host
 
@@ -518,17 +540,17 @@ func iotCommitPackageSet(t *imageType) rpmmd.PackageSet {
 	}
 	switch t.Arch().Name() {
 	case distro.X86_64ArchName:
-		ps = ps.Append(x8664IOTCommitPackageSet())
+		ps = ps.Append(x8664IOTCommitPackageSet(t))
 
 	case distro.Aarch64ArchName:
-		ps = ps.Append(aarch64IOTCommitPackageSet())
+		ps = ps.Append(aarch64IOTCommitPackageSet(t))
 	}
 
 	return ps
 
 }
 
-func x8664IOTCommitPackageSet() rpmmd.PackageSet {
+func x8664IOTCommitPackageSet(t *imageType) rpmmd.PackageSet {
 	return rpmmd.PackageSet{
 		Include: []string{
 			"grub2",
@@ -551,7 +573,7 @@ func x8664IOTCommitPackageSet() rpmmd.PackageSet {
 	}
 }
 
-func aarch64IOTCommitPackageSet() rpmmd.PackageSet {
+func aarch64IOTCommitPackageSet(t *imageType) rpmmd.PackageSet {
 	return rpmmd.PackageSet{
 		Include: []string{
 			"grub2",
@@ -797,4 +819,62 @@ func anacondaPackageSet(t *imageType) rpmmd.PackageSet {
 
 func iotInstallerPackageSet(t *imageType) rpmmd.PackageSet {
 	return anacondaPackageSet(t)
+}
+
+func iotSimplifiedInstallerPackageSet(t *imageType) rpmmd.PackageSet {
+	// common installer packages
+	ps := installerPackageSet(t)
+
+	ps = ps.Append(rpmmd.PackageSet{
+		Include: []string{
+			"attr",
+			"basesystem",
+			"binutils",
+			"bsdtar",
+			"clevis-dracut",
+			"clevis-luks",
+			"cloud-utils-growpart",
+			"coreos-installer",
+			"coreos-installer-dracut",
+			"coreutils",
+			"device-mapper-multipath",
+			"dnsmasq",
+			"dosfstools",
+			"dracut-live",
+			"e2fsprogs",
+			"fcoe-utils",
+			"fdo-init",
+			"gzip",
+			"ima-evm-utils",
+			"iproute",
+			"iptables",
+			"iputils",
+			"iscsi-initiator-utils",
+			"keyutils",
+			"lldpad",
+			"lvm2",
+			"passwd",
+			"policycoreutils",
+			"policycoreutils-python-utils",
+			"procps-ng",
+			"rootfiles",
+			"setools-console",
+			"sudo",
+			"traceroute",
+			"util-linux",
+		},
+	})
+
+	switch t.arch.Name() {
+
+	case distro.X86_64ArchName:
+		ps = ps.Append(x8664IOTCommitPackageSet(t))
+	case distro.Aarch64ArchName:
+		ps = ps.Append(aarch64IOTCommitPackageSet(t))
+
+	default:
+		panic(fmt.Sprintf("unsupported arch: %s", t.arch.Name()))
+	}
+
+	return ps
 }
