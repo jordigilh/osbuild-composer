@@ -454,6 +454,7 @@ type imageType struct {
 	filename           string
 	mimeType           string
 	packageSets        map[string]packageSetFunc
+	packageSetChains   map[string][]string
 	defaultImageConfig *distro.ImageConfig
 	kernelOptions      string
 	defaultSize        uint64
@@ -589,6 +590,10 @@ func (t *imageType) PayloadPipelines() []string {
 
 func (t *imageType) PayloadPackageSets() []string {
 	return []string{blueprintPkgsKey}
+}
+
+func (t *imageType) PackageSetsChains() map[string][]string {
+	return t.packageSetChains
 }
 
 func (t *imageType) Exports() []string {
